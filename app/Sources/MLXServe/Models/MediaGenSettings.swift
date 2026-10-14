@@ -11,10 +11,30 @@ struct LoraAdapter: Codable, Equatable, Identifiable {
     /// Absolute path to a `.safetensors` adapter. Empty rows (mid-edit, e.g.
     /// right after tapping "+") are dropped before the request is sent.
     var path: String = ""
-    /// Strength multiplier on top of the file's own alpha/rank scale.
+    /// Strength multiplier on top of the file's own alpha/rank scale. Signed:
+    /// slider LoRAs run -1...1, some -20...20, and a negative value reverses the effect.
     var scale: Double = 1.0
 
     private enum CodingKeys: String, CodingKey { case path, scale }
+}
+
+/// What the LoRA picker offers for a strength. The server takes any finite
+/// number; the slider only has to be usable, so it widens to fit the value.
+enum LoraScale {
+    /// Far past any published slider adapter (±20); only keeps a typo from overflowing bf16.
+    static let limit = 100.0
+
+    static func clamped(_ value: Double) -> Double {
+        value.isNaN ? 0 : min(limit, max(-limit, value))
+    }
+
+    /// Slider half-range: ±2 until a value outside it is entered, then the next multiple of 10.
+    static func sliderBound(for value: Double) -> Double {
+        let m = abs(value)
+        return m <= 2 ? 2 : min(limit, (m / 10).rounded(.up) * 10)
+    }
+
+    static func sliderStep(bound: Double) -> Double { bound <= 2 ? 0.05 : 0.5 }
 }
 
 /// Keys for the pre-multi-LoRA single `loraPath`/`loraScale` fields, kept

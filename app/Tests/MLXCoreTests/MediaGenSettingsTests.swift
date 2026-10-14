@@ -151,6 +151,29 @@ final class MediaGenSettingsTests: XCTestCase {
         XCTAssertEqual(decoded, s)
     }
 
+    /// Slider LoRAs run -1...1 and some -20...20: the slider starts at ±2 and
+    /// only widens when a value outside it is entered, never narrows.
+    func testLoraScaleSliderBoundWidensToFitTheValue() {
+        XCTAssertEqual(LoraScale.sliderBound(for: 0), 2)
+        XCTAssertEqual(LoraScale.sliderBound(for: 1.3), 2)
+        XCTAssertEqual(LoraScale.sliderBound(for: -2), 2)
+        XCTAssertEqual(LoraScale.sliderBound(for: -15), 20)
+        XCTAssertEqual(LoraScale.sliderBound(for: 20), 20)
+        XCTAssertEqual(LoraScale.sliderBound(for: 20.5), 30)
+        XCTAssertEqual(LoraScale.sliderBound(for: LoraScale.limit), LoraScale.limit)
+        XCTAssertEqual(LoraScale.sliderStep(bound: 2), 0.05)
+        XCTAssertEqual(LoraScale.sliderStep(bound: 20), 0.5)
+    }
+
+    func testLoraScaleKeepsSignedValuesAndTamesOverflow() {
+        XCTAssertEqual(LoraScale.clamped(-20), -20)
+        XCTAssertEqual(LoraScale.clamped(-0.35), -0.35)
+        XCTAssertEqual(LoraScale.clamped(20), 20)
+        XCTAssertEqual(LoraScale.clamped(1e30), LoraScale.limit)
+        XCTAssertEqual(LoraScale.clamped(-.infinity), -LoraScale.limit)
+        XCTAssertEqual(LoraScale.clamped(.nan), 0)
+    }
+
     /// A blob from before the draft was persisted decodes to the defaults for
     /// the new keys — an empty draft, the media block open, Advanced closed.
     func testVideoBlobWithoutTheDraftKeysStillDecodes() throws {
