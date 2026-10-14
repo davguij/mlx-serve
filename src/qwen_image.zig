@@ -746,34 +746,19 @@ pub const EditGeometry = struct {
     }
 };
 
-/// Adapters summed onto one block linear at forward time (never merged into
-/// the quantized weight). Borrowed from the attached `lora.Stack`.
-const LoraSlot = struct {
-    buf: [lora_mod.MAX_LORAS]lora_mod.Ref = undefined,
-    n: u8 = 0,
-
-    fn set(self: *LoraSlot, refs: []const lora_mod.Ref) void {
-        @memcpy(self.buf[0..refs.len], refs);
-        self.n = @intCast(refs.len);
-    }
-};
-
 const BlockLora = struct {
-    q: LoraSlot = .{},
-    k: LoraSlot = .{},
-    v: LoraSlot = .{},
-    o: LoraSlot = .{},
-    proj: LoraSlot = .{},
-    gate: LoraSlot = .{},
-    out: LoraSlot = .{},
+    q: lora_mod.Slot = .{},
+    k: lora_mod.Slot = .{},
+    v: lora_mod.Slot = .{},
+    o: lora_mod.Slot = .{},
+    proj: lora_mod.Slot = .{},
+    gate: lora_mod.Slot = .{},
+    out: lora_mod.Slot = .{},
 };
 
 /// `lin(x)` plus every adapter attached to it.
-fn linForward(lin: *const MfLinear, slot: *const LoraSlot, x: A, s: S) !A {
-    const y = try lin.forward(x, null, s);
-    if (slot.n == 0) return y;
-    defer free(y);
-    return lora_mod.addTo(y, x, slot.buf[0..slot.n], s);
+fn linForward(lin: *const MfLinear, slot: *const lora_mod.Slot, x: A, s: S) !A {
+    return lora_mod.addSlot(try lin.forward(x, null, s), x, slot, s);
 }
 
 const Block = struct {
@@ -1018,7 +1003,7 @@ pub const Dit = struct {
     }
 
     /// Project → per-head RMS norm → RoPE → [1, heads, L, hd].
-    fn headsOf(self: *const Dit, lin: *const MfLinear, slot: *const LoraSlot, norm: ?A, x: A, geo: *const Geometry) !A {
+    fn headsOf(self: *const Dit, lin: *const MfLinear, slot: *const lora_mod.Slot, norm: ?A, x: A, geo: *const Geometry) !A {
         const s = self.s;
         const sh = mlx.getShape(x);
         const y = try linForward(lin, slot, x, s);
@@ -1238,7 +1223,7 @@ pub const Dit = struct {
     }
 
     /// Project → per-head RMS norm → RoPE → [1, heads, L, hd], edit tables.
-    fn editHeadsOf(self: *const Dit, lin: *const MfLinear, slot: *const LoraSlot, norm: ?A, x: A, geo: *const Geometry) !A {
+    fn editHeadsOf(self: *const Dit, lin: *const MfLinear, slot: *const lora_mod.Slot, norm: ?A, x: A, geo: *const Geometry) !A {
         const s = self.s;
         const sh = mlx.getShape(x);
         const y = try linForward(lin, slot, x, s);
