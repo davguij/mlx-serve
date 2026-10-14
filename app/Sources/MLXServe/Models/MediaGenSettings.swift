@@ -11,11 +11,23 @@ struct LoraAdapter: Codable, Equatable, Identifiable {
     /// Absolute path to a `.safetensors` adapter. Empty rows (mid-edit, e.g.
     /// right after tapping "+") are dropped before the request is sent.
     var path: String = ""
-    /// Strength multiplier on top of the file's own alpha/rank scale. Signed:
-    /// slider LoRAs run -1...1, some -20...20, and a negative value reverses the effect.
+    /// Strength multiplier on top of the file's own alpha/rank scale. Negative
+    /// values reverse the effect and only slider-style LoRAs want them, so the
+    /// row keeps a 0 floor until `allowsNegative` is switched on.
     var scale: Double = 1.0
+    var allowsNegative: Bool = false
 
-    private enum CodingKeys: String, CodingKey { case path, scale }
+    private enum CodingKeys: String, CodingKey { case path, scale, allowsNegative }
+}
+
+extension LoraAdapter {
+    /// `allowsNegative` is absent from older blobs; a saved negative scale implies it.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = try c.decodeIfPresent(String.self, forKey: .path) ?? ""
+        scale = try c.decodeIfPresent(Double.self, forKey: .scale) ?? 1.0
+        allowsNegative = try c.decodeIfPresent(Bool.self, forKey: .allowsNegative) ?? (scale < 0)
+    }
 }
 
 /// What the LoRA picker offers for a strength. The server takes any finite
@@ -24,8 +36,8 @@ enum LoraScale {
     /// Far past any published slider adapter (±20); only keeps a typo from overflowing bf16.
     static let limit = 100.0
 
-    static func clamped(_ value: Double) -> Double {
-        value.isNaN ? 0 : min(limit, max(-limit, value))
+    static func clamped(_ value: Double, allowsNegative: Bool) -> Double {
+        value.isNaN ? 0 : min(limit, max(allowsNegative ? -limit : 0, value))
     }
 
     /// Slider half-range: ±2 until a value outside it is entered, then the next multiple of 10.

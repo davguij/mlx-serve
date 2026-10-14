@@ -165,13 +165,24 @@ final class MediaGenSettingsTests: XCTestCase {
         XCTAssertEqual(LoraScale.sliderStep(bound: 20), 0.5)
     }
 
-    func testLoraScaleKeepsSignedValuesAndTamesOverflow() {
-        XCTAssertEqual(LoraScale.clamped(-20), -20)
-        XCTAssertEqual(LoraScale.clamped(-0.35), -0.35)
-        XCTAssertEqual(LoraScale.clamped(20), 20)
-        XCTAssertEqual(LoraScale.clamped(1e30), LoraScale.limit)
-        XCTAssertEqual(LoraScale.clamped(-.infinity), -LoraScale.limit)
-        XCTAssertEqual(LoraScale.clamped(.nan), 0)
+    func testLoraScaleFloorFollowsTheNegativeToggleAndTamesOverflow() {
+        XCTAssertEqual(LoraScale.clamped(-20, allowsNegative: true), -20)
+        XCTAssertEqual(LoraScale.clamped(-0.35, allowsNegative: true), -0.35)
+        XCTAssertEqual(LoraScale.clamped(-0.35, allowsNegative: false), 0)
+        XCTAssertEqual(LoraScale.clamped(20, allowsNegative: false), 20)
+        XCTAssertEqual(LoraScale.clamped(1e30, allowsNegative: false), LoraScale.limit)
+        XCTAssertEqual(LoraScale.clamped(-.infinity, allowsNegative: true), -LoraScale.limit)
+        XCTAssertEqual(LoraScale.clamped(.nan, allowsNegative: true), 0)
+    }
+
+    /// Blobs saved before the toggle existed: a negative scale keeps working, the rest stay unsigned.
+    func testLoraAdapterWithoutTheToggleKeyDecodesFromItsScale() throws {
+        let old = Data(#"[{"path":"/a.safetensors","scale":-0.75},{"path":"/b.safetensors","scale":0.8}]"#.utf8)
+        let decoded = try JSONDecoder().decode([LoraAdapter].self, from: old)
+        XCTAssertEqual(decoded.map(\.allowsNegative), [true, false])
+        XCTAssertEqual(decoded.map(\.scale), [-0.75, 0.8])
+        let again = try JSONDecoder().decode([LoraAdapter].self, from: JSONEncoder().encode(decoded))
+        XCTAssertEqual(again.map(\.allowsNegative), [true, false])
     }
 
     /// A blob from before the draft was persisted decodes to the defaults for
