@@ -1327,6 +1327,17 @@ final class MediaGenServiceTests: XCTestCase {
         XCTAssertEqual(json["lora_scales"] as? [Double], [0.9])
     }
 
+    func testNegativeAndLargeLoraScalesReachTheServerUnchanged() {
+        var req = ImageGenRequest(model: .krea2Turbo, prompt: "x", width: 1024, height: 1024, steps: 8)
+        req.loras = [
+            LoraAdapter(path: "/tmp/slider.safetensors", scale: -0.75),
+            LoraAdapter(path: "/tmp/pornmaster.safetensors", scale: 20),
+            LoraAdapter(path: "/tmp/other.safetensors", scale: -20),
+        ]
+        let json = ImageGenService.requestJson(for: req, modelName: "m", seed: 1)
+        XCTAssertEqual(json["lora_scales"] as? [Double], [-0.75, 20, -20])
+    }
+
     func testImageRequestJsonOmitsGuidanceFieldsAtDefaults() {
         let req = ImageGenRequest(model: .flux2Klein9BBase_Q4, prompt: "x", width: 1024, height: 1024, steps: 30)
         let json = ImageGenService.requestJson(for: req, modelName: "m", seed: 1)
