@@ -42,7 +42,13 @@ struct LoraAdapterRow: View {
     }
 
     var body: some View {
-        let scale = Binding(get: { lora.scale }, set: { lora.scale = LoraScale.clamped($0) })
+        let negative = lora.allowsNegative
+        let scale = Binding(get: { lora.scale },
+                            set: { lora.scale = LoraScale.clamped($0, allowsNegative: negative) })
+        let allowsNegative = Binding(get: { lora.allowsNegative }, set: { on in
+            lora.allowsNegative = on
+            lora.scale = LoraScale.clamped(lora.scale, allowsNegative: on)
+        })
         let shown = max(bound, LoraScale.sliderBound(for: lora.scale))
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
@@ -54,6 +60,11 @@ struct LoraAdapterRow: View {
                     .truncationMode(.middle)
                     .help(lora.path)
                 Spacer()
+                Toggle("Negative", isOn: allowsNegative)
+                    .toggleStyle(.checkbox)
+                    .controlSize(.small)
+                    .font(.app(.caption))
+                    .help("Let the strength go below 0 for slider-style LoRAs; a negative value reverses the effect.")
                 Button(action: remove) {
                     Image(systemName: "xmark.circle.fill")
                 }
@@ -63,7 +74,7 @@ struct LoraAdapterRow: View {
             }
             HStack(spacing: 8) {
                 Text("Scale").font(.app(.rowTitle))
-                Slider(value: scale, in: -shown...shown, step: LoraScale.sliderStep(bound: shown))
+                Slider(value: scale, in: (negative ? -shown : 0)...shown, step: LoraScale.sliderStep(bound: shown))
                 // Fixed width: a field that sizes to its digits drags the
                 // slider's right edge every time the value crosses a width.
                 TextField("", value: scale, format: .number.grouping(.never).precision(.fractionLength(0...2)))
@@ -71,7 +82,9 @@ struct LoraAdapterRow: View {
                     .multilineTextAlignment(.trailing)
                     .font(.app(.caption).monospacedDigit())
                     .frame(width: 64)
-                    .help("Strength. Negative values reverse the effect; type a value to go past the slider (±\(Int(LoraScale.limit)) max).")
+                    .help(negative
+                          ? "Strength. Negative values reverse the effect; type a value to go past the slider (±\(Int(LoraScale.limit)) max)."
+                          : "Strength. Type a value to go past the slider (\(Int(LoraScale.limit)) max); tick Negative to go below 0.")
             }
             .onChange(of: lora.scale) { _, value in bound = max(bound, LoraScale.sliderBound(for: value)) }
         }
