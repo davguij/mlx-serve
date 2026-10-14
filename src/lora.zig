@@ -481,6 +481,30 @@ pub fn deltaSum(x: mlx.mlx_array, refs: []const Ref, s: mlx.mlx_stream) !mlx.mlx
 /// fixed-size array instead of a heap allocation on the hot path.
 pub const MAX_LORAS: usize = 8;
 
+/// The adapters attached to ONE linear, applied at RUN TIME and never folded into the base weight:
+/// merging rounds the delta away in bf16 and requantizes it away on quantized bases. Non-owning: the
+/// arrays belong to the `Stack` that produced the refs, which must outlive the slot.
+pub const Slot = struct {
+    refs: [MAX_LORAS]Ref = undefined,
+    count: u8 = 0,
+
+    pub fn set(self: *Slot, refs: []const Ref) void {
+        self.count = @intCast(refs.len);
+        @memcpy(self.refs[0..refs.len], refs);
+    }
+    pub fn active(self: *const Slot) []const Ref {
+        return self.refs[0..self.count];
+    }
+};
+
+/// `y + Σ deltas` when anything is attached, `y` unchanged otherwise. Consumes `y` either way, so a
+/// call site is one line around the base linear's output.
+pub fn addSlot(y: mlx.mlx_array, x: mlx.mlx_array, slot: *const Slot, s: mlx.mlx_stream) !mlx.mlx_array {
+    if (slot.count == 0) return y;
+    defer _ = mlx.mlx_array_free(y);
+    return addTo(y, x, slot.active(), s);
+}
+
 /// One loaded adapter pair, keyed by the module it targets.
 pub const Entry = struct {
     module: []u8, // owned
