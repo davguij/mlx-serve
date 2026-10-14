@@ -892,7 +892,7 @@ struct ImageGenView: View {
         panel.allowsMultipleSelection = true
         if AppActivation.runModal(panel) == .OK {
             for url in panel.urls.prefix(maxLoras - loras.count) {
-                loras.append(LoraAdapter(path: url.path))
+                loras.append(LoraAdapter.picked(path: url.path))
             }
         }
     }

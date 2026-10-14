@@ -14,27 +14,30 @@ struct LoraAdapter: Codable, Equatable, Identifiable {
     /// Strength multiplier on top of the file's own alpha/rank scale. Signed:
     /// slider LoRAs run -1...1, some -20...20, and a negative value reverses the effect.
     var scale: Double = 1.0
+    /// What the strength control offers for this adapter; see `LoraRange`.
+    var range: LoraRange = .regular
 
-    private enum CodingKeys: String, CodingKey { case path, scale }
-}
+    private enum CodingKeys: String, CodingKey { case path, scale, range }
 
-/// What the LoRA picker offers for a strength. The server takes any finite
-/// number; the slider only has to be usable, so it widens to fit the value.
-enum LoraScale {
-    /// Far past any published slider adapter (±20); only keeps a typo from overflowing bf16.
-    static let limit = 100.0
-
-    static func clamped(_ value: Double) -> Double {
-        value.isNaN ? 0 : min(limit, max(-limit, value))
+    init(path: String = "", scale: Double = 1.0, range: LoraRange = .regular) {
+        self.path = path
+        self.scale = scale
+        self.range = range
     }
 
-    /// Slider half-range: ±2 until a value outside it is entered, then the next multiple of 10.
-    static func sliderBound(for value: Double) -> Double {
-        let m = abs(value)
-        return m <= 2 ? 2 : min(limit, (m / 10).rounded(.up) * 10)
+    /// A freshly picked file: the range the user chose for it before, else a guess.
+    static func picked(path: String, scale: Double = 1.0) -> LoraAdapter {
+        let range = LoraRangeMemory.resolve(path: path)
+        return LoraAdapter(path: path, scale: range.clamped(scale), range: range)
     }
 
-    static func sliderStep(bound: Double) -> Double { bound <= 2 ? 0.05 : 0.5 }
+    /// Settings saved before `range` existed carry none: resolve it as if the file were just picked.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = try c.decode(String.self, forKey: .path)
+        scale = try c.decode(Double.self, forKey: .scale)
+        range = try c.decodeIfPresent(LoraRange.self, forKey: .range) ?? LoraRangeMemory.resolve(path: path)
+    }
 }
 
 /// Keys for the pre-multi-LoRA single `loraPath`/`loraScale` fields, kept
@@ -194,7 +197,7 @@ extension ImageGenSettings {
             let legacy = try decoder.container(keyedBy: LegacyLoraCodingKeys.self)
             let lp = try legacy.decodeIfPresent(String.self, forKey: .loraPath) ?? ""
             let ls = try legacy.decodeIfPresent(Double.self, forKey: .loraScale) ?? 1.0
-            if !lp.isEmpty { loras = [LoraAdapter(path: lp, scale: ls)] }
+            if !lp.isEmpty { loras = [LoraAdapter.picked(path: lp, scale: ls)] }
         }
         if let v = try c.decodeIfPresent(Int.self, forKey: .customWidth) { customWidth = v }
         if let v = try c.decodeIfPresent(Int.self, forKey: .customHeight) { customHeight = v }
@@ -568,7 +571,7 @@ extension VideoGenSettings {
             let legacy = try decoder.container(keyedBy: LegacyLoraCodingKeys.self)
             let lp = try legacy.decodeIfPresent(String.self, forKey: .loraPath) ?? ""
             let ls = try legacy.decodeIfPresent(Double.self, forKey: .loraScale) ?? 1.0
-            if !lp.isEmpty { loras = [LoraAdapter(path: lp, scale: ls)] }
+            if !lp.isEmpty { loras = [LoraAdapter.picked(path: lp, scale: ls)] }
         }
         if let v = try c.decodeIfPresent(String.self, forKey: .prompt) { prompt = v }
         firstFramePath = try c.decodeIfPresent(String.self, forKey: .firstFramePath)
