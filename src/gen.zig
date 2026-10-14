@@ -5714,6 +5714,23 @@ test "parseLoraFields: a LoRA path is accepted only from this machine (#540)" {
     try testing.expectEqual(@as(usize, 0), try parseLoraFields(a, "{\"prompt\":\"p\"}", &paths, &scales, false));
 }
 
+test "parseLoraFields: scales may be negative or far beyond 1, in every request shape" {
+    const a = testing.allocator;
+    var paths: [lora_mod.MAX_LORAS][]u8 = undefined;
+    var scales: [lora_mod.MAX_LORAS]f32 = undefined;
+    const Case = struct { body: []const u8, want: []const f32 };
+    const cases = [_]Case{
+        .{ .body = "{\"lora_paths\":[\"/a\",\"/b\"],\"lora_scales\":[-1, 20]}", .want = &.{ -1, 20 } },
+        .{ .body = "{\"lora_paths\":[\"/a\",\"/b\"],\"lora_scales\":\"-20 12.5\"}", .want = &.{ -20, 12.5 } },
+        .{ .body = "{\"lora_path\":\"/a\",\"lora_scale\":-12.5}", .want = &.{-12.5} },
+    };
+    for (cases) |c| {
+        const n = try parseLoraFields(a, c.body, &paths, &scales, true);
+        defer for (paths[0..n]) |p| a.free(p);
+        try testing.expectEqualSlices(f32, c.want, scales[0..n]);
+    }
+}
+
 test "openaiEditFormToJson: everything we can't honor is an explicit error" {
     const a = testing.allocator;
     const CT = "multipart/form-data; boundary=X";

@@ -1072,6 +1072,18 @@ test "addTo equals y + deltaSum in y's dtype, for one adapter and a stack" {
     }
 }
 
+fn testBf16Matrix(al: std.mem.Allocator, rows: usize, cols: usize, seed: f32, sm: mlx.mlx_stream) !mlx.mlx_array {
+    const host = try al.alloc(f32, rows * cols);
+    defer al.free(host);
+    for (host, 0..) |*v, i| v.* = @sin(@as(f32, @floatFromInt(i)) * 0.37 + seed);
+    const shape = [_]c_int{ @intCast(rows), @intCast(cols) };
+    const f32a = mlx.mlx_array_new_data(host.ptr, &shape, 2, .float32);
+    defer _ = mlx.mlx_array_free(f32a);
+    var out = mlx.mlx_array_new();
+    try mlx.check(mlx.mlx_astype(&out, f32a, .bfloat16, sm));
+    return out;
+}
+
 test "addTo with a zero or tiny scale returns y, at DiT-sized shapes" {
     const a = testing.allocator;
     const s = mlx.mlx_default_gpu_stream_new();
@@ -1080,19 +1092,7 @@ test "addTo with a zero or tiny scale returns y, at DiT-sized shapes" {
     const K = 512;
     const R = 16;
     const N = 768;
-    const mk = struct {
-        fn f(al: std.mem.Allocator, rows: usize, cols: usize, seed: f32, sm: mlx.mlx_stream) !mlx.mlx_array {
-            const host = try al.alloc(f32, rows * cols);
-            defer al.free(host);
-            for (host, 0..) |*v, i| v.* = @sin(@as(f32, @floatFromInt(i)) * 0.37 + seed);
-            const shape = [_]c_int{ @intCast(rows), @intCast(cols) };
-            const f32a = mlx.mlx_array_new_data(host.ptr, &shape, 2, .float32);
-            defer _ = mlx.mlx_array_free(f32a);
-            var out = mlx.mlx_array_new();
-            try mlx.check(mlx.mlx_astype(&out, f32a, .bfloat16, sm));
-            return out;
-        }
-    }.f;
+    const mk = testBf16Matrix;
     const x = try mk(a, M, K, 0.1, s);
     defer _ = mlx.mlx_array_free(x);
     const y = try mk(a, M, N, 0.7, s);
@@ -1120,6 +1120,66 @@ test "addTo with a zero or tiny scale returns y, at DiT-sized shapes" {
             max_abs = @max(max_abs, @abs(gp[i] - yp[i]));
         }
         try testing.expect(max_abs < 0.05);
+    }
+}
+
+test "addTo applies a negative or large scale with its sign, at DiT-sized shapes" {
+    const a = testing.allocator;
+    const s = mlx.mlx_default_gpu_stream_new();
+    defer _ = mlx.mlx_stream_free(s);
+    const M = 1024;
+    const K = 512;
+    const R = 16;
+    const N = 768;
+    const x = try testBf16Matrix(a, M, K, 0.1, s);
+    defer _ = mlx.mlx_array_free(x);
+    const y = try testBf16Matrix(a, M, N, 0.7, s);
+    defer _ = mlx.mlx_array_free(y);
+    const at = try testBf16Matrix(a, K, R, 1.3, s);
+    defer _ = mlx.mlx_array_free(at);
+    const bt = try testBf16Matrix(a, R, N, 2.1, s);
+    defer _ = mlx.mlx_array_free(bt);
+
+    // The truth is the unscaled delta and y in f32; a sign error is 200% off, bf16 rounding ~1%.
+    var x32 = mlx.mlx_array_new();
+    defer _ = mlx.mlx_array_free(x32);
+    var y32 = mlx.mlx_array_new();
+    defer _ = mlx.mlx_array_free(y32);
+    var at32 = mlx.mlx_array_new();
+    defer _ = mlx.mlx_array_free(at32);
+    var bt32 = mlx.mlx_array_new();
+    defer _ = mlx.mlx_array_free(bt32);
+    try mlx.check(mlx.mlx_astype(&x32, x, .float32, s));
+    try mlx.check(mlx.mlx_astype(&y32, y, .float32, s));
+    try mlx.check(mlx.mlx_astype(&at32, at, .float32, s));
+    try mlx.check(mlx.mlx_astype(&bt32, bt, .float32, s));
+    var xa = mlx.mlx_array_new();
+    defer _ = mlx.mlx_array_free(xa);
+    var d32 = mlx.mlx_array_new();
+    defer _ = mlx.mlx_array_free(d32);
+    try mlx.check(mlx.mlx_matmul(&xa, x32, at32, s));
+    try mlx.check(mlx.mlx_matmul(&d32, xa, bt32, s));
+    _ = mlx.mlx_array_eval(y32);
+    _ = mlx.mlx_array_eval(d32);
+    const yp = mlx.mlx_array_data_float32(y32) orelse return error.NoData;
+    const dp = mlx.mlx_array_data_float32(d32) orelse return error.NoData;
+    var d_max: f32 = 0;
+    for (dp[0 .. M * N]) |v| d_max = @max(d_max, @abs(v));
+
+    for ([_]f32{ -1.0, -0.5, -20.0, 20.0 }) |sc| {
+        const got = try addTo(y, x, &.{.{ .at = at, .bt = bt, .scale = sc }}, s);
+        defer _ = mlx.mlx_array_free(got);
+        var g32 = mlx.mlx_array_new();
+        defer _ = mlx.mlx_array_free(g32);
+        try mlx.check(mlx.mlx_astype(&g32, got, .float32, s));
+        _ = mlx.mlx_array_eval(g32);
+        const gp = mlx.mlx_array_data_float32(g32) orelse return error.NoData;
+        var max_err: f32 = 0;
+        for (0..M * N) |i| {
+            try testing.expect(std.math.isFinite(gp[i]));
+            max_err = @max(max_err, @abs(gp[i] - (yp[i] + sc * dp[i])));
+        }
+        try testing.expect(max_err < 0.05 * @abs(sc) * d_max + 0.05);
     }
 }
 
