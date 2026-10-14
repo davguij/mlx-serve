@@ -1908,7 +1908,7 @@ struct VideoGenView: View {
                     loras.remove(at: index)
                     persist()
                 }
-                .onChange(of: loras[index]) { _, _ in guard !hydrating else { return }; persist() }
+                .onChange(of: loras[index].scale) { _, _ in guard !hydrating else { return }; persist() }
             }
             // The way in is the well itself, and it comes back under the last
             // adapter so adding a second one needs no separate control. At the
@@ -1963,7 +1963,7 @@ struct VideoGenView: View {
         panel.allowsMultipleSelection = true
         if AppActivation.runModal(panel) == .OK {
             for url in panel.urls.prefix(maxLoras - loras.count) {
-                loras.append(LoraAdapter.picked(path: url.path))
+                loras.append(LoraAdapter(path: url.path))
             }
             persist()
         }
